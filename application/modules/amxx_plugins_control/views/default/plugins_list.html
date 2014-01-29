@@ -1,0 +1,27 @@
+<?php  if (!defined('BASEPATH')) exit('No direct script access allowed'); ?>
+<br />
+<form action="{site_url}amxx_plugins_control/server/{server_id}" method="post" accept-charset="utf-8">
+	<input type="hidden" name="<?php echo $this->security->get_csrf_token_name(); ?>" value="<?php echo $this->security->get_csrf_hash(); ?>" />
+	
+	<p align="center"><input class="button" type="submit" name="save" value="{lang_save}" />&nbsp;<input class="button" style="width:300px" type="submit" name="save_and_restart" value="Сохранить и перезагрузить сервер" /></p>
+	
+	<table width="100%" class="zebra">
+		<tbody>
+			<tr>
+				<th width="15%">{lang_amxx_plugin}</th>
+				<th width="70%">{lang_description}</th>
+				<th width="15%">{lang_enabled}</th>
+				<th width="15%">{lang_amxx_debug}</th>
+			</tr>
+		</tbody>
+	{plugins_list}
+		<tr>
+			<td>{name}</td>
+			<td>{description}</td>
+			<td>{checkbox_plugin_enabled}</td>
+			<td>{checkbox_debug_enabled}</td>
+		</tr>
+	{/plugins_list}
+	</table>
+	<p align="center"><input class="button" type="submit" name="save" value="{lang_save}" />&nbsp;<input class="button" style="width:300px" type="submit" name="save_and_restart" value="Сохранить и перезагрузить сервер" /></p>
+</form>

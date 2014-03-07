@@ -6,7 +6,7 @@
  *
  * @package		Game AdminPanel
  * @author		Nikita Kuznetsov (ET-NiK)
- * @copyright	Copyright (c) 2013, Nikita Kuznetsov (http://hldm.org)
+ * @copyright	Copyright (c) 2014, Nikita Kuznetsov (http://hldm.org)
  * @license		http://gameap.ru/license.html
  * @link		http://gameap.ru
  * @filesource
@@ -42,8 +42,10 @@ class Amxx_plugins_control extends MX_Controller {
 		$this->load->database();
         $this->load->model('users');
 		$this->load->model('servers');
+		$this->load->model('servers/games');
 		
 		// Загрузка языковых файлов
+		$this->lang->load('adm_servers');
         $this->lang->load('server_files');
         $this->lang->load('server_command');
         $this->lang->load('amxx_plugins_control');
@@ -89,33 +91,54 @@ class Amxx_plugins_control extends MX_Controller {
         $this->parser->parse('main.html', $this->tpl_data);
     }
     
+    // -----------------------------------------------------------------
+	
+	/**
+	 * Получение данных фильтра для вставки в шаблон
+	 */
+	private function _get_tpl_filter($filter = false)
+	{
+		if (!$filter) {
+			$filter = $this->users->get_filter('servers_list');
+		}
+		
+		if (empty($this->games->games_list)) {
+			$this->games->get_games_list();
+		}
+		
+		$games_option[0] = '---';
+		foreach($this->games->games_list as &$game) {
+			$games_option[ $game['code'] ] = $game['name'];
+		}
+		
+		$tpl_data['filter_name']			= isset($filter['name']) ? $filter['name'] : '';
+		$tpl_data['filter_ip']				= isset($filter['ip']) ? $filter['ip'] : '';
+		
+		$default = isset($filter['game']) ? $filter['game'] : null;
+		$tpl_data['filter_games_dropdown'] 	= form_dropdown('filter_game', $games_option, $default);
+		
+		return $tpl_data;
+	}
+    
     // ----------------------------------------------------------------
     
     /**
      * Получение данных сервера для шаблона
     */
-    private function _get_servers_tpl($limit = 10000, $offset = 0)
+    private function _get_servers_tpl($filter, $limit = 10000, $offset = 0)
     {
-
 		$tpl_data = array();
+		
+		$this->servers->set_filter($filter);
 		
 		/* Получение игровых серверов GoldSource */
 		if (!isset($this->servers_list)) {
 			$this->servers->get_servers_list($this->users->auth_id, 'VIEW', array('enabled' => '1', 'installed' => '1'), $limit, $offset, 'goldsource');
 		}
 		
-		$num = 0;
-		foreach ($this->servers->servers_list as &$server_data){
-			
-			$tpl_data[$num]['server_id'] 	= $server_data['id'];
-			$tpl_data[$num]['server_game'] 	= $server_data['game'];
-			$tpl_data[$num]['server_name'] 	= $server_data['name'];
-			$tpl_data[$num]['server_ip'] 	= $server_data['server_ip'];
-			$tpl_data[$num]['server_port'] 	= $server_data['server_port'];
-			
-			$num++;
-		}
-		
+		$tpl_data['url'] 			= site_url('admin/servers_files/server');
+		$tpl_data['games_list'] 	= servers_list_to_games_list($this->servers->servers_list);
+
 		return $tpl_data;
 	}
 	
@@ -277,7 +300,9 @@ class Amxx_plugins_control extends MX_Controller {
 
 		$plugins_ini_contents = implode("\n" , $plugins_ini_array) . implode("\n" , $new_strings);
 		
-		if ($this->servers->write_file($this->servers->server_data['start_code'] . '/addons/amxmodx/configs/plugins.ini', $plugins_ini_contents)) {
+		$dir = get_ds_file_path($this->servers->server_data) . '/' . $this->servers->server_data['start_code'] . '/addons/amxmodx/';
+
+		if (write_ds_file($dir . 'configs/plugins.ini', $plugins_ini_contents, $this->servers->server_data)) {
 			return true;
 		} else {
 			return false;
@@ -291,9 +316,14 @@ class Amxx_plugins_control extends MX_Controller {
     */
 	public function index()
 	{
-		$local_tpl_data['servers_list'] = $this->_get_servers_tpl();
-		$local_tpl_data['url'] 			= site_url('amxx_plugins_control/server');
+		$this->load->helper('games');
 		
+		$filter = $this->users->get_filter('servers_list');
+		$local_tpl_data = $this->_get_tpl_filter($filter);
+		
+		$local_tpl_data 		+= $this->_get_servers_tpl($filter);
+		$local_tpl_data['url'] 	= site_url('amxx_plugins_control/server');
+
 		$this->tpl_data['content'] .= $this->parser->parse('servers/select_server.html', $local_tpl_data, true);
 			
 		$this->parser->parse('main.html', $this->tpl_data);
@@ -306,6 +336,7 @@ class Amxx_plugins_control extends MX_Controller {
     */
 	public function server($server_id = false)
 	{
+		$this->load->helper('ds');
 		$this->load->library('form_validation');
 		
 		$local_tpl_data = array();
@@ -339,13 +370,51 @@ class Amxx_plugins_control extends MX_Controller {
 		}
 		
 		//~ $plugins_list = $this->servers->get_files_list(false, $this->servers->server_data['start_code'] . '/addons/amxmodx/plugins/*.amxx');
+		$dir = get_ds_file_path($this->servers->server_data) . '/' . $this->servers->server_data['start_code'] . '/addons/amxmodx/';
+		
+		try {
+			$list_files = list_ds_files($dir . 'plugins', $this->servers->server_data, true, array('amxx'));
+		} catch (Exception $e) {
+			$message = $e->getMessage();
+			
+			$this->_show_message($message);
+
+			// Сохраняем логи ошибок
+			$log_data['type'] = 'server_files';
+			$log_data['command'] = 'list_files';
+			$log_data['user_name'] = $this->users->auth_login;
+			$log_data['server_id'] = $this->servers->server_data['id'];
+			$log_data['msg'] = $message;
+			$log_data['log_data'] = 'Dir: ' . $dir . 'plugins';
+			$this->panel_log->save_log($log_data);
+			
+			return false;
+		}
 		
 		/* Перебор плагинов */
-		foreach($this->servers->get_files_list(false, $this->servers->server_data['start_code'] . '/addons/amxmodx/plugins/*.amxx') as $plugin) {
+		foreach($list_files as $plugin) {
 			$this->_plugins_list[] = basename($plugin['file_name']);
 		}
 		
-		$cfg_plugins = $this->servers->read_file($this->servers->server_data['start_code'] . '/addons/amxmodx/configs/plugins.ini');
+		try {
+			$cfg_plugins = read_ds_file($dir . 'configs/plugins.ini', $this->servers->server_data);
+		} catch (Exception $e) {
+			$message = $e->getMessage();
+			
+			$this->_show_message($message);
+
+			// Сохраняем логи ошибок
+			$log_data['type'] = 'server_files';
+			$log_data['command'] = 'read_file';
+			$log_data['user_name'] = $this->users->auth_login;
+			$log_data['server_id'] = $this->servers->server_data['id'];
+			$log_data['msg'] = $message;
+			$log_data['log_data'] = 'File' . $dir . 'configs/plugins.ini';
+			$this->panel_log->save_log($log_data);
+			
+			return false;
+		}
+		
 		$plugins_in_cfg_list = $this->_parse_plugins_in_cfg($cfg_plugins);
 		
 		if (!$plugins_in_cfg_list) {
@@ -357,6 +426,12 @@ class Amxx_plugins_control extends MX_Controller {
 		$this->form_validation->set_rules('plugins_debug', lang('amxx_debug'), '');
 		
 		if (!$this->form_validation->run()) {
+			
+			if (validation_errors()) {
+				$this->_show_message(validation_errors());
+				return false;
+			}
+			
 			$local_tpl_data['plugins_list'] = $this->_plugins_list_to_tpl($plugins_in_cfg_list);
 			$this->tpl_data['content'] = $this->parser->parse('plugins_list.html', $local_tpl_data, true);
 		} else {
@@ -383,8 +458,22 @@ class Amxx_plugins_control extends MX_Controller {
 				}
 			}
 			
-			if (!$this->_save_plugins($plugins_enabled, $plugins_debug, $cfg_plugins, $plugins_in_cfg_list)) {
-				$this->_show_message(lang('amxx_plugins_save_failed'));
+			try {
+				$this->_save_plugins($plugins_enabled, $plugins_debug, $cfg_plugins, $plugins_in_cfg_list);
+			} catch (Exception $e) {
+				$message = $e->getMessage();
+				
+				$this->_show_message(lang('amxx_plugins_save_failed') . '<br />' . $message);
+
+				// Сохраняем логи ошибок
+				$log_data['type'] = 'server_files';
+				$log_data['command'] = 'edit_config';
+				$log_data['user_name'] = $this->users->auth_login;
+				$log_data['server_id'] = $this->servers->server_data['id'];
+				$log_data['msg'] = $message;
+				$log_data['log_data'] = '';
+				$this->panel_log->save_log($log_data);
+				
 				return false;
 			}
 

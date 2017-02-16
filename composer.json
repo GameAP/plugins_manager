@@ -1,0 +1,16 @@
+{
+  "name": "gameap/plugins-manager",
+  "description": "GameAP GoldSource Plugin Manager",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Nikita Kuznetsov",
+      "email": "nikita.hldm@gmail.com",
+      "role": "Developer",
+      "homepage": "https://github.com/ET-Nik"
+    }
+  ],
+  "require": {
+    "php": ">=5.4"
+  }
+}
